@@ -119,15 +119,27 @@ export async function POST(req: NextRequest) {
       r.카테고리 !== BOX_CATEGORY,
   )
 
-  // ── 기존 데이터 전체 삭제 (modules, embedded_boxes, module_parts) ──
-  const [delModules, delBoxes, delParts] = await Promise.all([
+  // ── 기존 데이터 전체 삭제 (modules, module_parts) ──────────────
+  // embedded_boxes는 order_items FK 제약으로 인해 참조 중인 행은 삭제 불가 → 별도 처리
+  const { data: refsData } = await supabase.from('order_items').select('embedded_box_id').not('embedded_box_id', 'is', null)
+  const referencedBoxIds = [...new Set((refsData ?? []).map((r) => (r as any).embedded_box_id as string).filter(Boolean))]
+
+  const [delModules, delParts] = await Promise.all([
     supabase.from('modules').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
-    supabase.from('embedded_boxes').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
     supabase.from('module_parts').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
   ])
   if (delModules.error) return NextResponse.json({ error: `modules 삭제 실패: ${delModules.error.message}` }, { status: 500 })
-  if (delBoxes.error) return NextResponse.json({ error: `embedded_boxes 삭제 실패: ${delBoxes.error.message}` }, { status: 500 })
   if (delParts.error) return NextResponse.json({ error: `module_parts 삭제 실패: ${delParts.error.message}` }, { status: 500 })
+
+  // 참조되지 않는 embedded_boxes만 삭제
+  const delBoxes = referencedBoxIds.length > 0
+    ? await supabase.from('embedded_boxes').delete().not('id', 'in', `(${referencedBoxIds.join(',')})`)
+    : await supabase.from('embedded_boxes').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+  if (delBoxes.error) return NextResponse.json({ error: `embedded_boxes 삭제 실패: ${delBoxes.error.message}` }, { status: 500 })
+
+  // 삭제 후 남아있는 박스(참조 중) 이름 맵
+  const { data: remainingBoxes } = await supabase.from('embedded_boxes').select('id, name')
+  const existingBoxMap = new Map((remainingBoxes ?? []).map((b) => [normalizeName((b as any).name), (b as any).id as string]))
 
   let framesUpdated = 0
   let modulesAdded = 0
@@ -174,8 +186,7 @@ export async function POST(req: NextRequest) {
     else notFound.push(`프레임 업데이트 실패: ${colorName}`)
   }
 
-  // ── 2. 매립박스 (embedded_boxes 신규 삽입) ───────────────────
-  // 같은 상품명 중복 방지용 세트
+  // ── 2. 매립박스 (embedded_boxes 삽입/업데이트) ──────────────────
   const insertedBoxNames = new Set<string>()
   let boxSortOrder = 1
   for (const r of boxRows) {
@@ -183,15 +194,26 @@ export async function POST(req: NextRequest) {
     if (insertedBoxNames.has(key)) continue
     insertedBoxNames.add(key)
 
-    const { error } = await supabase.from('embedded_boxes').insert({
-      name: r.상품명,
-      price: r.단가,
-      image_url: `/boxes/${r.품목코드}.webp`,
-      is_active: true,
-      sort_order: boxSortOrder++,
-    })
-    if (!error) boxesUpdated++
-    else notFound.push(`매립박스 추가 실패: ${r.상품명}`)
+    const existingId = existingBoxMap.get(key)
+    if (existingId) {
+      const { error } = await supabase.from('embedded_boxes').update({
+        price: r.단가,
+        image_url: `/boxes/${r.품목코드}.webp`,
+        is_active: true,
+      }).eq('id', existingId)
+      if (!error) boxesUpdated++
+      else notFound.push(`매립박스 업데이트 실패: ${r.상품명}`)
+    } else {
+      const { error } = await supabase.from('embedded_boxes').insert({
+        name: r.상품명,
+        price: r.단가,
+        image_url: `/boxes/${r.품목코드}.webp`,
+        is_active: true,
+        sort_order: boxSortOrder++,
+      })
+      if (!error) boxesUpdated++
+      else notFound.push(`매립박스 추가 실패: ${r.상품명}`)
+    }
   }
 
   // ── 3. 모듈 (modules 신규 삽입) ─────────────────────────────
@@ -226,7 +248,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── 4. module_parts (낱개부품 신규 삽입) ────────────────────
-  const partRows = [...frameRows, ...moduleRows].map((r) => ({
+  const partRows = [...frameRows, ...moduleRows, ...boxRows].map((r) => ({
     module_name: r.상품명,
     color_name: r.색상,
     part_code: r.품목코드,
