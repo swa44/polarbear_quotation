@@ -422,7 +422,7 @@ export default function QuotePage() {
           </div>
 
           {(() => {
-            const discountedProduct = Math.round((quote.total_price * 0.625) / 10) * 10;
+            const discountedProduct = Math.round((quote.total_price * 0.65) / 10) * 10;
             const discountAmount = quote.total_price - discountedProduct;
             const finalPrice = discountedProduct + 3000;
             return (
