@@ -28,6 +28,7 @@ export default function LucciairAdminOrdersPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [savingId, setSavingId] = useState<string | null>(null)
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
 
   const [editMemo, setEditMemo] = useState<Record<string, string>>({})
   const [editTracking, setEditTracking] = useState<Record<string, string>>({})
@@ -39,6 +40,7 @@ export default function LucciairAdminOrdersPage() {
     const data = await res.json()
     if (data.orders) {
       setOrders(data.orders)
+      setSelectedOrderIds((prev) => prev.filter((id) => data.orders.some((o: FanOrder) => o.id === id)))
       const memos: Record<string, string> = {}
       const trackings: Record<string, string> = {}
       const companies: Record<string, string> = {}
@@ -84,10 +86,40 @@ export default function LucciairAdminOrdersPage() {
 
   const handleSaveMemo = (id: string) => patch(id, { admin_memo: editMemo[id] })
 
+  const toggleOrderSelection = (id: string, checked: boolean) => {
+    setSelectedOrderIds((prev) => {
+      if (checked) return [...prev, id]
+      return prev.filter((v) => v !== id)
+    })
+  }
+
+  const handleBulkExpire = async () => {
+    if (selectedOrderIds.length === 0) return
+    if (!confirm(`선택한 ${selectedOrderIds.length}건의 견적을 만료 처리할까요?`)) return
+    setSavingId('bulk')
+    await fetch('/api/lucciair-admin/orders', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: selectedOrderIds, status: 'expired' }),
+    })
+    setSelectedOrderIds([])
+    await fetchOrders()
+    setSavingId(null)
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">견적 관리</h1>
+        <Button
+          variant="danger"
+          size="sm"
+          loading={savingId === 'bulk'}
+          onClick={handleBulkExpire}
+          disabled={selectedOrderIds.length === 0}
+        >
+          선택 만료 처리 ({selectedOrderIds.length})
+        </Button>
       </div>
 
       <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
@@ -129,6 +161,15 @@ export default function LucciairAdminOrdersPage() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
+                      <div className="mb-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedOrderIds.includes(order.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => toggleOrderSelection(order.id, e.target.checked)}
+                          className="w-4 h-4 accent-gray-900"
+                        />
+                      </div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono text-sm font-semibold text-gray-900">{order.order_number}</span>
                         <Badge className={ORDER_STATUS_COLOR[order.status] ?? 'bg-gray-100 text-gray-500'}>
@@ -236,6 +277,11 @@ export default function LucciairAdminOrdersPage() {
                       {['quoted', 'shipping_info_submitted', 'waiting_deposit', 'paid'].includes(order.status) && (
                         <Button size="sm" variant="danger" loading={savingId === order.id} onClick={() => handleUpdateStatus(order.id, 'cancelled')}>
                           취소
+                        </Button>
+                      )}
+                      {['quoted', 'shipping_info_submitted', 'waiting_deposit'].includes(order.status) && (
+                        <Button size="sm" variant="secondary" loading={savingId === order.id} onClick={() => handleUpdateStatus(order.id, 'expired')}>
+                          만료 처리
                         </Button>
                       )}
                     </div>

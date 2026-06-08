@@ -104,7 +104,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: '권한이 없습니다.' }, { status: 401 })
     }
 
-    const { id, status, tracking_number, tracking_company, admin_memo } = await req.json()
+    const { id, ids, status, tracking_number, tracking_company, admin_memo } = await req.json()
 
     const supabase = createServiceClient()
     const updateData: Record<string, unknown> = {}
@@ -116,6 +116,13 @@ export async function PATCH(req: NextRequest) {
     if (status === 'paid') updateData.paid_at = new Date().toISOString()
     if (status === 'shipped') updateData.shipped_at = new Date().toISOString()
     if (status === 'cancelled') updateData.cancelled_at = new Date().toISOString()
+
+    // 여러 건 일괄 처리 (예: 선택한 견적 일괄 만료)
+    if (Array.isArray(ids) && ids.length > 0) {
+      const { error: bulkError } = await supabase.from('orders').update(updateData).in('id', ids)
+      if (bulkError) throw bulkError
+      return NextResponse.json({ success: true })
+    }
 
     const { data, error } = await supabase
       .from('orders')

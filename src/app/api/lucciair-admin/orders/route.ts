@@ -26,20 +26,31 @@ export async function PATCH(req: NextRequest) {
 
   try {
     const body = await req.json() as {
-      id: string
+      id?: string
+      ids?: string[]
       status?: string
       admin_memo?: string
       tracking_number?: string
       tracking_company?: string
       send_shipping_alimtalk?: boolean
     }
-    const { id, send_shipping_alimtalk, ...updates } = body
+    const { id, ids, send_shipping_alimtalk, ...updates } = body
 
     const supabase = createServiceClient()
 
     if (updates.status === 'paid') Object.assign(updates, { paid_at: new Date().toISOString() })
     if (updates.status === 'shipped') Object.assign(updates, { shipped_at: new Date().toISOString() })
     if (updates.status === 'cancelled') Object.assign(updates, { cancelled_at: new Date().toISOString() })
+
+    // 여러 건 일괄 처리 (예: 선택한 견적 일괄 만료)
+    if (Array.isArray(ids) && ids.length > 0) {
+      const { error: bulkError } = await supabase
+        .from('fan_orders')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .in('id', ids)
+      if (bulkError) throw bulkError
+      return NextResponse.json({ success: true })
+    }
 
     const { error } = await supabase.from('fan_orders').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', id)
     if (error) throw error

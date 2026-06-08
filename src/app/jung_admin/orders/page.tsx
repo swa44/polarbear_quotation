@@ -146,11 +146,34 @@ export default function AdminOrdersPage() {
     })
   }
 
+  const handleBulkExpire = async () => {
+    if (selectedOrderIds.length === 0) return
+    if (!confirm(`선택한 ${selectedOrderIds.length}건의 견적을 만료 처리할까요?`)) return
+    setSavingId('bulk')
+    await fetch('/api/admin/orders', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: selectedOrderIds, status: 'expired' }),
+    })
+    setSelectedOrderIds([])
+    await fetchOrders()
+    setSavingId(null)
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">견적 관리</h1>
         <div className="flex items-center gap-2">
+          <Button
+            variant="danger"
+            size="sm"
+            loading={savingId === 'bulk'}
+            onClick={handleBulkExpire}
+            disabled={selectedOrderIds.length === 0}
+          >
+            선택 만료 처리 ({selectedOrderIds.length})
+          </Button>
           <Button
             variant="secondary"
             size="sm"
@@ -375,6 +398,16 @@ export default function AdminOrdersPage() {
                           onClick={() => handleUpdateStatus(order.id, 'cancelled')}
                         >
                           취소
+                        </Button>
+                      )}
+                      {['quoted', 'shipping_info_submitted', 'waiting_deposit'].includes(order.status) && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          loading={savingId === order.id}
+                          onClick={() => handleUpdateStatus(order.id, 'expired')}
+                        >
+                          만료 처리
                         </Button>
                       )}
                     </div>
